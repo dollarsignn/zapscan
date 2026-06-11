@@ -1,0 +1,81 @@
+Alert	Risk	Detail
+Cross-Domain Misconfiguration	Medium	CORS policy possibly too permissive — check which origins are allowed
+Retrieved from Cache	Info	Some responses cached by browser/proxy — low concern
+
+10 alerts total — 4 Medium, 2 Low, 4 Informational. No High-risk issues.
+Key Medium-risk findings:
+- No CSP Header — XSS risk;
+ (CSP Header Not Set means the server doesn't send a Content-Security-Policy HTTP response header, so browsers allow any scripts/resources to load — making XSS attacks much easier.
+To fix: Add a Content-Security-Policy header to your server's responses. A reasonable starting policy:
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://images.unsplash.com https://www.vectorlogo.zone; connect-src 'self'
+This would:
+- Allow scripts & resources only from your own origin ('self')
+- Allow styles from fonts.googleapis.com (since ZAP saw requests there)
+- Allow fonts from fonts.gstatic.com
+- Allow images from Unsplash and Vectorlogo.zone (external images the report shows being loaded)
+)
+
+ no Content Security Policy to restrict what scripts/ resources can load
+- Missing Anti-clickjacking Header — The site can be embedded in an iframe (clickjacking risk)
+(
+CSP (Content Security Policy)
+Without a CSP header, the browser trusts any script, style, or resource the page tries to load. 
+If an attacker finds an XSS hole (e.g., injects a <script src="https://evil.com/malware.js"> into a comment or URL parameter),
+ the browser happily loads and executes it. CSP lets you whitelist exactly where resources can come from — script-src 'self' blocks everything except scripts from your own domain.
+Missing Anti-clickjacking Header
+Without X-Frame-Options: DENY (or SAMEORIGIN) or a Content-Security-Policy: frame-ancestors 'none' directive,
+ an attacker can load your site inside a hidden <iframe> on their malicious page. The user thinks they're clicking the attacker's UI,
+ but they're actually clicking your site's buttons (e.g., "Delete Account", "Transfer Funds", "Change Password"). This is clickjacking — the attacker "hijacks" 
+clicks by framing your transparent page over their fake buttons.
+)
+
+- Cross-Domain Misconfiguration (CORS) — Permissive cross-origin policy may allow data access from other sites
+
+(
+CORS (Cross-Origin Resource Sharing) is a browser mechanism that lets a server declare which other origins are allowed to read its responses. 
+A misconfiguration means the server sends an overly permissive header like:
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true
+This tells the browser: "any website can make authenticated requests to brillsign.com and read the response."
+ So an attacker could host evil.com, trick a logged-in user to visit it, and that page's JavaScript can fetch https://brillsign.com/api/user/profile — the browser sees
+ the permissive CORS header and allows evil.com to read the response, exfiltrating the user's data.
+The fix: Only allow specific, trusted origins:
+Access-Control-Allow-Origin: https://your-trusted-frontend.com
+Or if no other site needs to read your API, don't send CORS headers at all (or send Access-Control-Allow-Origin: null for resource requests only from the same origin).
+)
+
+
+- Missing Subresource Integrity (SRI) — External JS/CSS loaded without integrity hashes (supply-chain tampering risk) 
+(
+SRI (Subresource Integrity) uses a cryptographic hash to verify that an externally hosted file hasn't been modified. You add an integrity attribute to <script> or <link> tags:
+<script src="https://cdn.example.com/lib.js" integrity="sha384-abc123..."></script>
+Without it: If the CDN hosting that library gets compromised (e.g., someone hacks cdnjs, unpkg, or a jQuery CDN account),
+ they can replace the legitimate JS file with malicious code. Your site would load and execute the tampered script — giving the attacker full control over every page that includes it. 
+Users never notice because the URL stays the same.
+The fix: Calculate the sha384 or sha512 hash of each external file and add it as the integrity attribute. 
+Browsers will refuse to execute the file if its hash doesn't match — even if the CDN is compromised.
+)
+
+Low-risk:
+- No HSTS — No Strict-Transport-Security header (downgrade attacks possible)
+
+(
+HSTS (HTTP Strict-Transport-Security) tells the browser to only connect to your site over HTTPS, never plain HTTP.
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+Without it, a downgrade attack works like this:
+1. User types brillsign.com or clicks a link (or has a bookmark from before they used HTTPS)
+2. Browser tries http://brillsign.com first (default)
+3. Attacker on the same network (e.g., coffee shop WiFi) intercepts that HTTP request with a man-in-the-middle attack
+4. Attacker responds with a fake page or redirects to a phishing site — or just strips out all the HTTPS links, keeping the user on plain HTTP
+5. User never notices, attacker sees all traffic in plaintext (passwords, cookies, etc.)
+This is called SSL stripping.
+The fix:
+Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+- max-age = how long (in seconds) to remember "HTTPS only"
+- includeSubDomains = applies to all subdomains too
+- preload = you can also submit your domain to browser's HSTS preload list so even the first visit is forced to HTTPS
+)
+
+- Missing X-Content-Type-Options — Browser may MIME-sniff, enabling script-injection in non-script responses
+Informational:
+- Suspicious comments in HTML source, cache-control issues, modern web app fingerprint, and cached responses
